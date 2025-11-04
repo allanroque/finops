@@ -3,7 +3,7 @@
   amazon.aws.ec2_instance_info:
     region: "{{ region }}"
   register: ec2_instances
-  delegate_to: localhost
+  failed_when: false
 
 - name: Collect unused EBS volumes for region {{ region }}
   amazon.aws.ec2_vol_info:
@@ -11,14 +11,30 @@
     filters:
       status: available
   register: unused_volumes
-  delegate_to: localhost
   failed_when: false
 
 - name: Collect Elastic IPs for region {{ region }}
   amazon.aws.ec2_eip_info:
     region: "{{ region }}"
   register: eips
-  delegate_to: localhost
+  failed_when: false
+
+- name: Collect Load Balancers for region {{ region }}
+  amazon.aws.elbv2_target_group_info:
+    region: "{{ region }}"
+  register: target_groups
+  failed_when: false
+
+- name: Collect Load Balancer listeners
+  amazon.aws.elbv2_listener_info:
+    region: "{{ region }}"
+  register: lb_listeners
+  failed_when: false
+
+- name: Collect Auto Scaling Groups for region {{ region }}
+  amazon.aws.autoscaling_group_info:
+    region: "{{ region }}"
+  register: asg_info
   failed_when: false
 
 - name: Process instances data
@@ -98,6 +114,53 @@
       {%- endif -%}
       {{ eip_list }}
 
+- name: Process Load Balancers
+  ansible.builtin.set_fact:
+    processed_lbs: >-
+      {%- set lbs = [] -%}
+      {%- if target_groups.target_groups is defined and target_groups.target_groups is iterable -%}
+        {%- for tg in target_groups.target_groups -%}
+          {%- if tg.target_group_arn is defined -%}
+            {%- set healthy_targets = tg.health_check_path | default([]) -%}
+            {%- set lb_data = {
+              'target_group_arn': tg.target_group_arn,
+              'target_group_name': tg.target_group_name | default('N/A'),
+              'region': region,
+              'vpc_id': tg.vpc_id | default('N/A'),
+              'protocol': tg.protocol | default('N/A'),
+              'port': tg.port | default('N/A'),
+              'health_check_enabled': tg.health_check_enabled | default(False),
+              'target_health_descriptions': tg.target_health_descriptions | default([]),
+              'has_healthy_targets': (tg.target_health_descriptions | default([]) | selectattr('target_health.state', 'equalto', 'healthy') | list | length) > 0
+            } -%}
+            {%- set _ = lbs.append(lb_data) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ lbs }}
+
+- name: Process Auto Scaling Groups
+  ansible.builtin.set_fact:
+    processed_asgs: >-
+      {%- set asgs = [] -%}
+      {%- if asg_info.autoscaling_groups is defined and asg_info.autoscaling_groups is iterable -%}
+        {%- for asg in asg_info.autoscaling_groups -%}
+          {%- if asg.auto_scaling_group_name is defined -%}
+            {%- set asg_data = {
+              'asg_name': asg.auto_scaling_group_name,
+              'region': region,
+              'min_size': asg.min_size | default(0),
+              'max_size': asg.max_size | default(0),
+              'desired_capacity': asg.desired_capacity | default(0),
+              'instances': asg.instances | default([]),
+              'is_empty': (asg.min_size | default(0) == 0 and asg.max_size | default(0) == 0) or (asg.desired_capacity | default(0) == 0)
+            } -%}
+            {%- set _ = asgs.append(asg_data) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ asgs }}
+
 - name: Aggregate region data
   ansible.builtin.set_fact:
     region_data:
@@ -111,7 +174,7 @@
         instances: "{{ processed_instances | rejectattr('has_required_tags') | list }}"
       unused_volumes:
         count: "{{ processed_volumes | length }}"
-        total_size_gb: "{{ processed_volumes | sum(attribute='size') | default(0) }}"
+        total_size_gb: "{{ processed_volumes | sum(attribute='size') }}"
         details: "{{ processed_volumes }}"
       unused_eips:
         count: "{{ processed_eips | rejectattr('associated') | list | length }}"
@@ -119,6 +182,12 @@
       stopped_instances:
         count: "{{ processed_instances | selectattr('state', 'equalto', 'stopped') | list | length }}"
         details: "{{ processed_instances | selectattr('state', 'equalto', 'stopped') | list }}"
+      load_balancers:
+        without_healthy_targets: "{{ processed_lbs | rejectattr('has_healthy_targets') | list }}"
+        details: "{{ processed_lbs }}"
+      auto_scaling_groups:
+        empty: "{{ processed_asgs | selectattr('is_empty') | list }}"
+        details: "{{ processed_asgs }}"
 
 - name: Add region data to global list
   ansible.builtin.set_fact:

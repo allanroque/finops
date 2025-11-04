@@ -129,6 +129,32 @@ def main():
             eip['region'] = region
             all_unused_eips.append(eip)
     
+    # Preparar dados de Load Balancers e ASGs
+    all_lbs_without_targets = []
+    all_empty_asgs = []
+    instances_non_standard_regions = []
+    
+    standard_regions = ['us-east-1', 'us-east-2']  # Regiões padrão permitidas
+    
+    for region_data in data.get('regions', []):
+        region = region_data.get('region', 'unknown')
+        
+        # Load Balancers sem targets saudáveis
+        for lb in region_data.get('load_balancers', {}).get('without_healthy_targets', []):
+            lb['region'] = region
+            all_lbs_without_targets.append(lb)
+        
+        # Auto Scaling Groups vazios
+        for asg in region_data.get('auto_scaling_groups', {}).get('empty', []):
+            asg['region'] = region
+            all_empty_asgs.append(asg)
+        
+        # Instâncias em regiões não padrão
+        for instance in region_data.get('instances', {}).get('details', []):
+            if instance.get('region') not in standard_regions:
+                instance['region'] = region
+                instances_non_standard_regions.append(instance)
+
     # Métricas principais
     col1, col2, col3, col4 = st.columns(4)
     
@@ -183,14 +209,20 @@ def main():
             df_regions = pd.DataFrame(region_stats).T.reset_index()
             df_regions.columns = ['Região', 'Em Execução', 'Paradas', 'Total']
             
+            # Ordenar por total para melhor visualização
+            df_regions = df_regions.sort_values('Total', ascending=False)
+            
             fig = px.bar(
                 df_regions, 
                 x='Região', 
                 y=['Em Execução', 'Paradas'],
                 title="Distribuição de Instâncias por Região",
                 barmode='stack',
-                color_discrete_map={'Em Execução': '#00cc00', 'Paradas': '#ff4444'}
+                color_discrete_map={'Em Execução': '#00cc00', 'Paradas': '#ff4444'},
+                labels={'value': 'Quantidade', 'Região': 'Região AWS'}
             )
+            # Rotacionar labels do eixo X para melhor visualização
+            fig.update_xaxes(tickangle=-45)
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
@@ -321,6 +353,64 @@ def main():
             st.dataframe(df_eips, use_container_width=True, hide_index=True)
         else:
             st.success("✅ Nenhum EIP não utilizado encontrado")
+        
+        st.subheader("🌍 Instâncias em Regiões Não Padrão")
+        if instances_non_standard_regions:
+            st.warning(f"⚠️ {len(instances_non_standard_regions)} instâncias encontradas em regiões fora do padrão (us-east-1, us-east-2)")
+            st.info("💡 Considere mover essas instâncias para as regiões padrão para reduzir custos e simplificar a gestão.")
+            df_non_standard = pd.DataFrame([
+                {
+                    'Instance ID': inst.get('instance_id', 'N/A'),
+                    'Nome': inst.get('name', 'N/A'),
+                    'Região': inst.get('region', 'N/A'),
+                    'Estado': inst.get('state', 'N/A'),
+                    'Tipo': inst.get('instance_type', 'N/A'),
+                    'Owner': inst.get('owner', 'N/A'),
+                    'Environment': inst.get('environment', 'N/A')
+                }
+                for inst in instances_non_standard_regions
+            ])
+            st.dataframe(df_non_standard, use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Todas as instâncias estão nas regiões padrão")
+        
+        st.subheader("⚖️ Load Balancers Sem Targets Saudáveis")
+        if all_lbs_without_targets:
+            st.warning(f"⚠️ {len(all_lbs_without_targets)} Load Balancers sem targets saudáveis encontrados")
+            st.info("💡 Esses Load Balancers podem ser removidos se não estiverem em uso.")
+            df_lbs = pd.DataFrame([
+                {
+                    'Target Group Name': lb.get('target_group_name', 'N/A'),
+                    'Target Group ARN': lb.get('target_group_arn', 'N/A'),
+                    'Região': lb.get('region', 'N/A'),
+                    'Protocolo': lb.get('protocol', 'N/A'),
+                    'Porta': lb.get('port', 'N/A'),
+                    'VPC ID': lb.get('vpc_id', 'N/A')
+                }
+                for lb in all_lbs_without_targets
+            ])
+            st.dataframe(df_lbs, use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Todos os Load Balancers possuem targets saudáveis")
+        
+        st.subheader("📈 Auto Scaling Groups Vazios")
+        if all_empty_asgs:
+            st.warning(f"⚠️ {len(all_empty_asgs)} Auto Scaling Groups vazios encontrados")
+            st.info("💡 ASGs com min=0, max=0 ou desired=0 podem ser removidos se não estiverem em uso.")
+            df_asgs = pd.DataFrame([
+                {
+                    'ASG Name': asg.get('asg_name', 'N/A'),
+                    'Região': asg.get('region', 'N/A'),
+                    'Min Size': asg.get('min_size', 0),
+                    'Max Size': asg.get('max_size', 0),
+                    'Desired Capacity': asg.get('desired_capacity', 0),
+                    'Instâncias': len(asg.get('instances', []))
+                }
+                for asg in all_empty_asgs
+            ])
+            st.dataframe(df_asgs, use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ Nenhum Auto Scaling Group vazio encontrado")
     
     # TAB 4: Instâncias
     with tab4:
