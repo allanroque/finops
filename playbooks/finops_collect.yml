@@ -98,6 +98,15 @@
           collection_timestamp: "{{ current_timestamp.stdout }}"
           regions: "{{ finops_regions_data | default([]) }}"
 
+    - name: Ensure output directory exists on ansible-1 before saving
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user | default('ansible') }}"
+      delegate_to: ansible-1
+      become: true
+
     - name: Save collected data to JSON file on ansible-1
       ansible.builtin.copy:
         content: "{{ finops_data | to_json(indent=2) }}"
