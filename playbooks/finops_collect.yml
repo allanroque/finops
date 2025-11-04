@@ -14,7 +14,6 @@
         path: "{{ output_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user | default('ansible') }}"
       become: true
 
     - name: Ensure app directory exists
@@ -22,7 +21,6 @@
         path: "{{ app_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user | default('ansible') }}"
       become: true
 
     - name: Ensure pip3 is installed
@@ -103,7 +101,6 @@
         path: "{{ output_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user | default('ansible') }}"
       delegate_to: ansible-1
       become: true
 
@@ -112,7 +109,6 @@
         content: "{{ finops_data | to_json(indent=2) }}"
         dest: "{{ output_file }}"
         mode: '0644'
-        owner: "{{ ansible_user | default('ansible') }}"
       delegate_to: ansible-1
       become: true
 
@@ -136,7 +132,6 @@
         src: "{{ playbook_dir }}/../streamlit_app.py"
         dest: "{{ streamlit_app }}"
         mode: '0644'
-        owner: "{{ ansible_user | default('ansible') }}"
       become: true
 
     - name: Check if Streamlit is already running
@@ -165,7 +160,6 @@
         echo $!
       register: streamlit_pid
       changed_when: true
-      become_user: "{{ ansible_user | default('ansible') }}"
 
     - name: Wait for Streamlit to start
       ansible.builtin.pause:
