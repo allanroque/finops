@@ -1,0 +1,66 @@
+---
+- name: Collect FinOps Data for Streamlit Dashboard
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    output_dir: "{{ playbook_dir }}/../data"
+    output_file: "{{ output_dir }}/aws_finops_data.json"
+    
+  tasks:
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure pip3 and boto3 are installed
+      package:
+        name:
+          - python3-pip
+        state: present
+      become: true
+
+    - name: Install boto3 and pandas
+      pip:
+        name:
+          - boto3
+          - pandas
+        executable: pip3
+
+    - name: Get AWS account information
+      amazon.aws.aws_caller_info:
+      register: aws_account_info
+      delegate_to: localhost
+
+    - name: Collect FinOps data from all regions
+      ansible.builtin.include_role:
+        name: "../roles/collect_finops_data"
+        vars:
+          region: "{{ item }}"
+      loop: "{{ ec2_regions }}"
+
+    - name: Compile all collected data
+      ansible.builtin.set_fact:
+        finops_data:
+          account_id: "{{ aws_account_info.account }}"
+          account_alias: "{{ aws_account_info.account_alias | default('N/A') }}"
+          user_arn: "{{ aws_account_info.arn }}"
+          collection_timestamp: "{{ ansible_date_time.iso8601 }}"
+          regions: "{{ finops_regions_data | default([]) }}"
+
+    - name: Save collected data to JSON file
+      ansible.builtin.copy:
+        content: "{{ finops_data | to_json(indent=2) }}"
+        dest: "{{ output_file }}"
+        mode: '0644'
+      delegate_to: localhost
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg: "FinOps data collected and saved to {{ output_file }}"
+```
+
+```
+
