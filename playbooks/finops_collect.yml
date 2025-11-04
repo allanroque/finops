@@ -1,4 +1,34 @@
 ---
+# Play 1: Preparar ambiente no servidor ansible-1
+- name: Prepare environment on ansible-1 server
+  hosts: ansible-1
+  gather_facts: false
+  
+  vars:
+    output_dir: "{{ playbook_dir }}/../data"
+    
+  tasks:
+    - name: Ensure output directory exists
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure pip3 is installed
+      package:
+        name:
+          - python3-pip
+        state: present
+      become: true
+
+    - name: Install boto3 and pandas
+      pip:
+        name:
+          - boto3
+          - pandas
+        executable: pip3
+
+# Play 2: Coletar dados AWS (executa no execution environment localhost)
 - name: Collect FinOps Data for Streamlit Dashboard
   hosts: localhost
   connection: local
@@ -27,26 +57,6 @@
       - 'sa-east-1'
     
   tasks:
-    - name: Ensure output directory exists
-      ansible.builtin.file:
-        path: "{{ output_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Ensure pip3 and boto3 are installed
-      package:
-        name:
-          - python3-pip
-        state: present
-      become: true
-
-    - name: Install boto3 and pandas
-      pip:
-        name:
-          - boto3
-          - pandas
-        executable: pip3
-
     - name: Get AWS account information
       amazon.aws.aws_caller_info:
       register: aws_account_info
@@ -68,13 +78,13 @@
           collection_timestamp: "{{ ansible_date_time.iso8601 }}"
           regions: "{{ finops_regions_data | default([]) }}"
 
-    - name: Save collected data to JSON file
+    - name: Save collected data to JSON file on ansible-1
       ansible.builtin.copy:
         content: "{{ finops_data | to_json(indent=2) }}"
         dest: "{{ output_file }}"
         mode: '0644'
-      delegate_to: localhost
+      delegate_to: ansible-1
 
     - name: Display summary
       ansible.builtin.debug:
-        msg: "FinOps data collected and saved to {{ output_file }}"
+        msg: "FinOps data collected and saved to {{ output_file }} on ansible-1"
