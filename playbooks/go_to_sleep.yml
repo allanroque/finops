@@ -1,0 +1,153 @@
+---
+- name: Go to Sleep - Stop EC2 Instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Lista de IDs de instâncias para parar (opcional)
+    instance_ids: "{{ instance_ids | default([]) }}"
+    
+    # Filtros por tags (usado se instance_ids não for fornecido)
+    filter_environment: "{{ filter_environment | default(['dev', 'test', 'sandbox']) }}"
+    filter_name: "{{ filter_name | default(omit) }}"
+    
+    # Regiões onde buscar instâncias
+    regions: "{{ regions | default(['us-east-1', 'us-east-2']) }}"
+    
+  tasks:
+    - name: Display execution parameters
+      ansible.builtin.debug:
+        msg: |
+          Desligando instâncias EC2:
+          - Instance IDs: {{ instance_ids if instance_ids else 'Nenhum (usando filtros)' }}
+          - Filter Environment: {{ filter_environment }}
+          - Filter Name: {{ filter_name | default('Nenhum') }}
+          - Regions: {{ regions }}
+
+    - name: Get instances to stop by ID list
+      block:
+        - name: Get instance information by IDs
+          amazon.aws.ec2_instance_info:
+            region: "{{ item }}"
+            instance_ids: "{{ instance_ids }}"
+          register: instances_by_id
+          loop: "{{ regions }}"
+          when: instance_ids | length > 0
+
+        - name: Compile instances from ID list
+          ansible.builtin.set_fact:
+            instances_to_stop: >-
+              {%- set instances = [] -%}
+              {%- for result in instances_by_id.results -%}
+                {%- if result.instances is defined -%}
+                  {%- for instance in result.instances -%}
+                    {%- if instance.state.name == 'running' -%}
+                      {%- set _ = instances.append({
+                        'instance_id': instance.instance_id,
+                        'region': result.item,
+                        'name': instance.tags.Name | default('N/A'),
+                        'environment': instance.tags.Environment | default('N/A'),
+                        'state': instance.state.name
+                      }) -%}
+                    {%- endif -%}
+                  {%- endfor -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ instances }}
+          when: instance_ids | length > 0
+
+      when: instance_ids | length > 0
+
+    - name: Get instances to stop by tag filters
+      block:
+        - name: Get instances by environment tags
+          amazon.aws.ec2_instance_info:
+            region: "{{ item }}"
+            filters:
+              "tag:Environment": "{{ filter_environment }}"
+              instance-state-name: running
+              {% if filter_name is defined and filter_name != omit %}
+              "tag:Name": "{{ filter_name }}"
+              {% endif %}
+          register: instances_by_tag
+          loop: "{{ regions }}"
+          when: instance_ids | length == 0
+
+        - name: Compile instances from tag filters
+          ansible.builtin.set_fact:
+            instances_to_stop: >-
+              {%- set instances = [] -%}
+              {%- for result in instances_by_tag.results -%}
+                {%- if result.instances is defined -%}
+                  {%- for instance in result.instances -%}
+                    {%- set _ = instances.append({
+                      'instance_id': instance.instance_id,
+                      'region': result.item,
+                      'name': instance.tags.Name | default('N/A'),
+                      'environment': instance.tags.Environment | default('N/A'),
+                      'state': instance.state.name
+                    }) -%}
+                  {%- endfor -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ instances }}
+          when: instance_ids | length == 0
+
+      when: instance_ids | length == 0
+
+    - name: Set default empty list if no instances found
+      ansible.builtin.set_fact:
+        instances_to_stop: []
+      when: instances_to_stop is not defined
+
+    - name: Display instances that will be stopped
+      ansible.builtin.debug:
+        msg: |
+          Instâncias que serão desligadas ({{ instances_to_stop | length }}):
+          {%- for inst in instances_to_stop -%}
+          - {{ inst.instance_id }} ({{ inst.name }}) - {{ inst.region }} - {{ inst.environment }}
+          {%- endfor -%}
+
+    - name: Stop EC2 instances
+      block:
+        - name: Stop instances
+          amazon.aws.ec2_instance:
+            region: "{{ item.region }}"
+            instance_ids:
+              - "{{ item.instance_id }}"
+            state: stopped
+            wait: true
+            wait_timeout: 300
+          register: stop_result
+          loop: "{{ instances_to_stop }}"
+
+        - name: Display stop results
+          ansible.builtin.debug:
+            msg: "✅ Instância {{ item.item.instance_id }} ({{ item.item.name }}) desligada com sucesso em {{ item.item.region }}"
+          loop: "{{ stop_result.results }}"
+          when: item.changed
+
+        - name: Display already stopped instances
+          ansible.builtin.debug:
+            msg: "ℹ️  Instância {{ item.item.instance_id }} ({{ item.item.name }}) já estava desligada em {{ item.item.region }}"
+          loop: "{{ stop_result.results }}"
+          when: not item.changed
+
+        - name: Summary
+          ansible.builtin.debug:
+            msg: |
+              ==========================================
+              RESUMO - GO TO SLEEP:
+              ==========================================
+              Total de instâncias encontradas: {{ instances_to_stop | length }}
+              Instâncias desligadas com sucesso: {{ stop_result.results | selectattr('changed', 'equalto', True) | list | length }}
+              Instâncias que já estavam desligadas: {{ stop_result.results | selectattr('changed', 'equalto', False) | list | length }}
+              ==========================================
+
+      when: instances_to_stop | length > 0
+
+    - name: No instances to stop
+      ansible.builtin.debug:
+        msg: "ℹ️  Nenhuma instância em execução encontrada para desligar com os critérios especificados."
+      when: instances_to_stop | length == 0

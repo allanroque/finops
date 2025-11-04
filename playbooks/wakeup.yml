@@ -1,0 +1,155 @@
+---
+- name: Wake Up - Start EC2 Instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Lista de IDs de instâncias para iniciar (opcional)
+    instance_ids: "{{ instance_ids | default([]) }}"
+    
+    # Filtros por tags (usado se instance_ids não for fornecido)
+    filter_environment: "{{ filter_environment | default(['dev', 'test', 'sandbox']) }}"
+    filter_name: "{{ filter_name | default(omit) }}"
+    
+    # Regiões onde buscar instâncias
+    regions: "{{ regions | default(['us-east-1', 'us-east-2']) }}"
+    
+  tasks:
+    - name: Display execution parameters
+      ansible.builtin.debug:
+        msg: |
+          Ligando instâncias EC2:
+          - Instance IDs: {{ instance_ids if instance_ids else 'Nenhum (usando filtros)' }}
+          - Filter Environment: {{ filter_environment }}
+          - Filter Name: {{ filter_name | default('Nenhum') }}
+          - Regions: {{ regions }}
+
+    - name: Get instances to start by ID list
+      block:
+        - name: Get instance information by IDs
+          amazon.aws.ec2_instance_info:
+            region: "{{ item }}"
+            instance_ids: "{{ instance_ids }}"
+          register: instances_by_id
+          loop: "{{ regions }}"
+          when: instance_ids | length > 0
+
+        - name: Compile instances from ID list
+          ansible.builtin.set_fact:
+            instances_to_start: >-
+              {%- set instances = [] -%}
+              {%- for result in instances_by_id.results -%}
+                {%- if result.instances is defined -%}
+                  {%- for instance in result.instances -%}
+                    {%- if instance.state.name == 'stopped' -%}
+                      {%- set _ = instances.append({
+                        'instance_id': instance.instance_id,
+                        'region': result.item,
+                        'name': instance.tags.Name | default('N/A'),
+                        'environment': instance.tags.Environment | default('N/A'),
+                        'state': instance.state.name
+                      }) -%}
+                    {%- endif -%}
+                  {%- endfor -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ instances }}
+          when: instance_ids | length > 0
+
+      when: instance_ids | length > 0
+
+    - name: Get instances to start by tag filters
+      block:
+        - name: Get instances by environment tags
+          amazon.aws.ec2_instance_info:
+            region: "{{ item }}"
+            filters:
+              "tag:Environment": "{{ filter_environment }}"
+              instance-state-name: stopped
+              {% if filter_name is defined and filter_name != omit %}
+              "tag:Name": "{{ filter_name }}"
+              {% endif %}
+          register: instances_by_tag
+          loop: "{{ regions }}"
+          when: instance_ids | length == 0
+
+        - name: Compile instances from tag filters
+          ansible.builtin.set_fact:
+            instances_to_start: >-
+              {%- set instances = [] -%}
+              {%- for result in instances_by_tag.results -%}
+                {%- if result.instances is defined -%}
+                  {%- for instance in result.instances -%}
+                    {%- set _ = instances.append({
+                      'instance_id': instance.instance_id,
+                      'region': result.item,
+                      'name': instance.tags.Name | default('N/A'),
+                      'environment': instance.tags.Environment | default('N/A'),
+                      'state': instance.state.name
+                    }) -%}
+                  {%- endfor -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ instances }}
+          when: instance_ids | length == 0
+
+      when: instance_ids | length == 0
+
+    - name: Set default empty list if no instances found
+      ansible.builtin.set_fact:
+        instances_to_start: []
+      when: instances_to_start is not defined
+
+    - name: Display instances that will be started
+      ansible.builtin.debug:
+        msg: |
+          Instâncias que serão ligadas ({{ instances_to_start | length }}):
+          {%- for inst in instances_to_start -%}
+          - {{ inst.instance_id }} ({{ inst.name }}) - {{ inst.region }} - {{ inst.environment }}
+          {%- endfor -%}
+
+    - name: Start EC2 instances
+      block:
+        - name: Start instances
+          amazon.aws.ec2_instance:
+            region: "{{ item.region }}"
+            instance_ids:
+              - "{{ item.instance_id }}"
+            state: running
+            wait: true
+            wait_timeout: 300
+          register: start_result
+          loop: "{{ instances_to_start }}"
+
+        - name: Display start results
+          ansible.builtin.debug:
+            msg: "✅ Instância {{ item.item.instance_id }} ({{ item.item.name }}) ligada com sucesso em {{ item.item.region }}"
+          loop: "{{ start_result.results }}"
+          when: item.changed
+
+        - name: Display already running instances
+          ansible.builtin.debug:
+            msg: "ℹ️  Instância {{ item.item.instance_id }} ({{ item.item.name }}) já estava em execução em {{ item.item.region }}"
+          loop: "{{ start_result.results }}"
+          when: not item.changed
+
+        - name: Summary
+          ansible.builtin.debug:
+            msg: |
+              ==========================================
+              RESUMO - WAKE UP:
+              ==========================================
+              Total de instâncias encontradas: {{ instances_to_start | length }}
+              Instâncias ligadas com sucesso: {{ start_result.results | selectattr('changed', 'equalto', True) | list | length }}
+              Instâncias que já estavam em execução: {{ start_result.results | selectattr('changed', 'equalto', False) | list | length }}
+              ==========================================
+
+      when: instances_to_start | length > 0
+
+    - name: No instances to start
+      ansible.builtin.debug:
+        msg: "ℹ️  Nenhuma instância parada encontrada para ligar com os critérios especificados."
+      when: instances_to_start | length == 0
+```
+
