@@ -27,10 +27,11 @@
       {%- set instances = [] -%}
       {%- if ec2_instances.instances is defined -%}
         {%- for instance in ec2_instances.instances -%}
+          {%- set state_normalized = instance.state.name | lower -%}
           {%- set instance_data = {
             'instance_id': instance.instance_id,
             'instance_type': instance.instance_type,
-            'state': instance.state.name,
+            'state': state_normalized,
             'region': region,
             'vpc_id': instance.vpc_id | default('N/A'),
             'subnet_id': instance.subnet_id | default('N/A'),
