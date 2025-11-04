@@ -111,21 +111,15 @@
         mode: '0644'
       delegate_to: localhost
 
-    - name: Copy JSON file from localhost to ansible-1 temp location
+    - name: Copy JSON file directly to ansible-1 final location
       ansible.builtin.copy:
         src: "/tmp/aws_finops_data.json"
-        dest: "/tmp/aws_finops_data.json"
+        dest: "{{ output_file }}"
         mode: '0644'
-      delegate_to: ansible-1
-
-    - name: Move JSON file to final location on ansible-1
-      ansible.builtin.shell: |
-        cp /tmp/aws_finops_data.json {{ output_file }}
-        chmod 644 {{ output_file }}
       delegate_to: ansible-1
       become: true
 
-    - name: Verify file was created
+    - name: Verify file was created on ansible-1
       ansible.builtin.stat:
         path: "{{ output_file }}"
       register: file_stat
@@ -133,14 +127,13 @@
 
     - name: Display file verification
       ansible.builtin.debug:
-        msg: "File {{ output_file }} exists: {{ file_stat.stat.exists }}, size: {{ file_stat.stat.size | default('N/A') }} bytes"
+        msg: "File {{ output_file }} exists: {{ file_stat.stat.exists }}, size: {{ file_stat.stat.size | default('N/A') }} bytes, path: {{ file_stat.stat.path | default('N/A') }}"
 
-    - name: Clean up temporary files
-      ansible.builtin.file:
-        path: "/tmp/aws_finops_data.json"
-        state: absent
+    - name: Fail if file was not created
+      ansible.builtin.fail:
+        msg: "File {{ output_file }} was not created on ansible-1!"
+      when: not file_stat.stat.exists
       delegate_to: ansible-1
-      failed_when: false
 
     - name: Clean up local temporary file
       ansible.builtin.file:
