@@ -6,9 +6,9 @@
   tasks:
     - name: Ensure pip3 is installed
       package:
-      name:
-        - python3-pip
-      state: present
+        name:
+          - python3-pip
+        state: present
 
     - name: Ensure boto3 is installed
       pip:
