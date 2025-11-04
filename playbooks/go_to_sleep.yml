@@ -9,8 +9,10 @@
     instance_ids: "{{ instance_ids | default([]) }}"
     
     # Filtros por tags (usado se instance_ids não for fornecido)
-    filter_environment: "{{ filter_environment | default(['dev', 'test', 'sandbox']) }}"
-    filter_name: "{{ filter_name | default(omit) }}"
+    filter_environment: "{{ filter_environment | default(['lab', 'test', 'sandbox']) }}"
+    
+    # Instâncias específicas por nome
+    specific_instance_names: "{{ specific_instance_names | default(['rhel-5']) }}"
     
     # Regiões onde buscar instâncias
     regions: "{{ regions | default(['us-east-1', 'us-east-2']) }}"
@@ -22,7 +24,7 @@
           Desligando instâncias EC2:
           - Instance IDs: {{ instance_ids if instance_ids else 'Nenhum (usando filtros)' }}
           - Filter Environment: {{ filter_environment }}
-          - Filter Name: {{ filter_name | default('Nenhum') }}
+          - Specific Instance Names: {{ specific_instance_names }}
           - Regions: {{ regions }}
 
     - name: Get instances to stop by ID list
@@ -37,12 +39,12 @@
 
         - name: Compile instances from ID list
           ansible.builtin.set_fact:
-            instances_to_stop: >-
+            instances_to_stop_from_ids: >-
               {%- set instances = [] -%}
               {%- for result in instances_by_id.results -%}
                 {%- if result.instances is defined -%}
                   {%- for instance in result.instances -%}
-                    {%- if instance.state.name == 'running' -%}
+                    {%- if instance.state.name | lower == 'running' -%}
                       {%- set _ = instances.append({
                         'instance_id': instance.instance_id,
                         'region': result.item,
@@ -59,7 +61,7 @@
 
       when: instance_ids | length > 0
 
-    - name: Get instances to stop by tag filters
+    - name: Get instances to stop by environment tags
       block:
         - name: Get instances by environment tags
           amazon.aws.ec2_instance_info:
@@ -67,18 +69,15 @@
             filters:
               "tag:Environment": "{{ filter_environment }}"
               instance-state-name: running
-              {% if filter_name is defined and filter_name != omit %}
-              "tag:Name": "{{ filter_name }}"
-              {% endif %}
-          register: instances_by_tag
+          register: instances_by_env
           loop: "{{ regions }}"
           when: instance_ids | length == 0
 
-        - name: Compile instances from tag filters
+        - name: Compile instances from environment tags
           ansible.builtin.set_fact:
-            instances_to_stop: >-
+            instances_to_stop_from_env: >-
               {%- set instances = [] -%}
-              {%- for result in instances_by_tag.results -%}
+              {%- for result in instances_by_env.results -%}
                 {%- if result.instances is defined -%}
                   {%- for instance in result.instances -%}
                     {%- set _ = instances.append({
@@ -95,6 +94,74 @@
           when: instance_ids | length == 0
 
       when: instance_ids | length == 0
+
+    - name: Get specific instances by name
+      block:
+        - name: Get instances by specific names
+          amazon.aws.ec2_instance_info:
+            region: "{{ item.region }}"
+            filters:
+              "tag:Name": "{{ item.name }}"
+              instance-state-name: running
+          register: instances_by_name
+          loop: "{{ regions | product(specific_instance_names) | map('combine') | map('dict') | list }}"
+          vars:
+            region: "{{ item[0] }}"
+            name: "{{ item[1] }}"
+          when: instance_ids | length == 0
+
+        - name: Compile instances from specific names
+          ansible.builtin.set_fact:
+            instances_to_stop_from_names: >-
+              {%- set instances = [] -%}
+              {%- for result in instances_by_name.results -%}
+                {%- if result.instances is defined -%}
+                  {%- for instance in result.instances -%}
+                    {%- set _ = instances.append({
+                      'instance_id': instance.instance_id,
+                      'region': result.item[0],
+                      'name': instance.tags.Name | default('N/A'),
+                      'environment': instance.tags.Environment | default('N/A'),
+                      'state': instance.state.name
+                    }) -%}
+                  {%- endfor -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {{ instances }}
+          when: instance_ids | length == 0
+
+      when: instance_ids | length == 0
+
+    - name: Combine all instances to stop (remove duplicates)
+      ansible.builtin.set_fact:
+        instances_to_stop: >-
+          {%- set all_instances = [] -%}
+          {%- set seen_ids = [] -%}
+          {%- if instances_to_stop_from_ids is defined -%}
+            {%- for inst in instances_to_stop_from_ids -%}
+              {%- if inst.instance_id not in seen_ids -%}
+                {%- set _ = all_instances.append(inst) -%}
+                {%- set _ = seen_ids.append(inst.instance_id) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {%- if instances_to_stop_from_env is defined -%}
+            {%- for inst in instances_to_stop_from_env -%}
+              {%- if inst.instance_id not in seen_ids -%}
+                {%- set _ = all_instances.append(inst) -%}
+                {%- set _ = seen_ids.append(inst.instance_id) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {%- if instances_to_stop_from_names is defined -%}
+            {%- for inst in instances_to_stop_from_names -%}
+              {%- if inst.instance_id not in seen_ids -%}
+                {%- set _ = all_instances.append(inst) -%}
+                {%- set _ = seen_ids.append(inst.instance_id) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ all_instances }}
 
     - name: Set default empty list if no instances found
       ansible.builtin.set_fact:
