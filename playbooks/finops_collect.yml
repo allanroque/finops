@@ -7,6 +7,24 @@
   vars:
     output_dir: "{{ playbook_dir }}/../data"
     output_file: "{{ output_dir }}/aws_finops_data.json"
+    ec2_regions:
+      - 'us-east-1'
+      - 'us-east-2'
+      - 'us-west-1'
+      - 'us-west-2'
+      - 'ca-central-1'
+      - 'ap-south-1'
+      - 'ap-southeast-1'
+      - 'ap-southeast-2'
+      - 'ap-northeast-1'
+      - 'ap-northeast-2'
+      - 'ap-northeast-3'
+      - 'eu-central-1'
+      - 'eu-west-1'
+      - 'eu-west-2'
+      - 'eu-west-3'
+      - 'eu-north-1'
+      - 'sa-east-1'
     
   tasks:
     - name: Ensure output directory exists
@@ -60,7 +78,3 @@
     - name: Display summary
       ansible.builtin.debug:
         msg: "FinOps data collected and saved to {{ output_file }}"
-```
-
-```
-
