@@ -244,6 +244,7 @@
         src: "/tmp/aws_finops_data_backup.json"
         dest: "{{ output_file }}"
         mode: '0644'
+        remote_src: true
       become: true
       when: streamlit_status.stdout != "not_running"
 
