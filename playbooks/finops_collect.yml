@@ -55,8 +55,8 @@
     - name: Collect FinOps data from all regions
       ansible.builtin.include_role:
         name: "../roles/collect_finops_data"
-        vars:
-          region: "{{ item }}"
+      vars:
+        region: "{{ item }}"
       loop: "{{ ec2_regions }}"
 
     - name: Compile all collected data
