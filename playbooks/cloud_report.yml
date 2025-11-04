@@ -4,15 +4,6 @@
   gather_facts: true
 
   tasks:
-    - name: Ensure pip3 is installed
-      package:
-        name:
-          - python3-pip
-        state: present
-
-    - name: Ensure boto3 is installed
-      pip:
-        name: boto3
 
     - name: Load retrieve info role
       ansible.builtin.include_role:
@@ -23,6 +14,17 @@
   gather_facts: true
 
   tasks:
+
+    - name: Ensure pip3 is installed
+      package:
+        name:
+          - python3-pip
+        state: present
+
+    - name: Ensure boto3 is installed
+      pip:
+        name: boto3
+        
     - name: Load retrieve info role
       ansible.builtin.include_role:
         name: "../roles/retrieve_info"
