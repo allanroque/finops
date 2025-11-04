@@ -5,24 +5,25 @@
   gather_facts: false
   
   vars:
-    # Lista de IDs de instâncias para iniciar (opcional)
-    instance_ids: "{{ instance_ids | default([]) }}"
-    
-    # Filtros por tags (usado se instance_ids não for fornecido)
-    filter_environment: "{{ filter_environment | default(['lab', 'test', 'sandbox']) }}"
-    
-    # Instâncias específicas por nome
-    specific_instance_names: "{{ specific_instance_names | default(['rhel-5']) }}"
-    
-    # Regiões onde buscar instâncias
-    regions: "{{ regions | default(['us-east-1', 'us-east-2']) }}"
+    # Valores padrão (podem ser sobrescritos via extra-vars)
+    instance_ids_default: []
+    filter_environment_default: ['lab', 'test', 'sandbox']
+    specific_instance_names_default: ['rhel-5']
+    regions_default: ['us-east-1', 'us-east-2']
     
   tasks:
+    - name: Set variables with defaults
+      ansible.builtin.set_fact:
+        instance_ids: "{{ instance_ids | default(instance_ids_default) }}"
+        filter_environment: "{{ filter_environment | default(filter_environment_default) }}"
+        specific_instance_names: "{{ specific_instance_names | default(specific_instance_names_default) }}"
+        regions: "{{ regions | default(regions_default) }}"
+
     - name: Display execution parameters
       ansible.builtin.debug:
         msg: |
           Ligando instâncias EC2:
-          - Instance IDs: {{ instance_ids if instance_ids else 'Nenhum (usando filtros)' }}
+          - Instance IDs: {{ instance_ids if instance_ids | length > 0 else 'Nenhum (usando filtros)' }}
           - Filter Environment: {{ filter_environment }}
           - Specific Instance Names: {{ specific_instance_names }}
           - Regions: {{ regions }}
@@ -99,15 +100,12 @@
       block:
         - name: Get instances by specific names
           amazon.aws.ec2_instance_info:
-            region: "{{ item.region }}"
+            region: "{{ item.0 }}"
             filters:
-              "tag:Name": "{{ item.name }}"
+              "tag:Name": "{{ item.1 }}"
               instance-state-name: stopped
           register: instances_by_name
-          loop: "{{ regions | product(specific_instance_names) | map('combine') | map('dict') | list }}"
-          vars:
-            region: "{{ item[0] }}"
-            name: "{{ item[1] }}"
+          loop: "{{ regions | product(specific_instance_names) | list }}"
           when: instance_ids | length == 0
 
         - name: Compile instances from specific names
@@ -218,4 +216,3 @@
       ansible.builtin.debug:
         msg: "ℹ️  Nenhuma instância parada encontrada para ligar com os critérios especificados."
       when: instances_to_start | length == 0
-```
