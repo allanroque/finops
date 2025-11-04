@@ -180,18 +180,40 @@ def main():
                     'total': instances.get('total', 0)
                 }
             
-            df_regions = pd.DataFrame(region_stats).T.reset_index()
-            df_regions.columns = ['Região', 'Em Execução', 'Paradas', 'Total']
-            
-            fig = px.bar(
-                df_regions, 
-                x='Região', 
-                y=['Em Execução', 'Paradas'],
-                title="Distribuição de Instâncias por Região",
-                barmode='stack',
-                color_discrete_map={'Em Execução': '#00cc00', 'Paradas': '#ff4444'}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            if region_stats:
+                # Criar DataFrame corretamente
+                df_regions = pd.DataFrame([
+                    {
+                        'Região': region,
+                        'Em Execução': stats['running'],
+                        'Paradas': stats['stopped'],
+                        'Total': stats['total']
+                    }
+                    for region, stats in region_stats.items()
+                ])
+                
+                # Ordenar por total para melhor visualização
+                df_regions = df_regions.sort_values('Total', ascending=False)
+                
+                fig = px.bar(
+                    df_regions, 
+                    x='Região', 
+                    y=['Em Execução', 'Paradas'],
+                    title="Distribuição de Instâncias por Região",
+                    barmode='stack',
+                    color_discrete_map={'Em Execução': '#00cc00', 'Paradas': '#ff4444'},
+                    labels={'value': 'Quantidade', 'Região': 'Região AWS'}
+                )
+                # Rotacionar labels do eixo X para melhor visualização
+                fig.update_xaxes(tickangle=-45)
+                fig.update_layout(
+                    xaxis_title="Região AWS",
+                    yaxis_title="Quantidade de Instâncias",
+                    legend_title="Status"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Nenhuma região encontrada com instâncias.")
         
         with col2:
             st.subheader("Tipos de Instâncias")
@@ -409,14 +431,31 @@ def main():
             cc_counts = {}
             for inst in all_instances:
                 cc = inst.get('cost_center', 'N/A')
+                if cc == 'N/A' or cc == '':
+                    cc = 'N/A'
                 cc_counts[cc] = cc_counts.get(cc, 0) + 1
             
             if cc_counts:
                 df_cc = pd.DataFrame(list(cc_counts.items()), columns=['CostCenter', 'Quantidade'])
+                # Ordenar por quantidade de forma decrescente
                 df_cc = df_cc.sort_values('Quantidade', ascending=False).head(10)
-                fig = px.bar(df_cc, x='CostCenter', y='Quantidade',
-                           title="Top 10 CostCenters")
+                # Converter CostCenter para string para garantir que os labels sejam exibidos corretamente
+                df_cc['CostCenter'] = df_cc['CostCenter'].astype(str)
+                fig = px.bar(
+                    df_cc, 
+                    x='CostCenter', 
+                    y='Quantidade',
+                    title="Top 10 CostCenters",
+                    labels={'CostCenter': 'Cost Center', 'Quantidade': 'Quantidade de Instâncias'}
+                )
+                fig.update_xaxes(tickangle=-45)
+                fig.update_layout(
+                    xaxis_title="Cost Center",
+                    yaxis_title="Quantidade de Instâncias"
+                )
                 st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Nenhum CostCenter encontrado.")
         
         st.subheader("Distribuição por Owner")
         owner_counts = {}
