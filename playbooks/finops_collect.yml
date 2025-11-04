@@ -71,6 +71,12 @@
       - 'sa-east-1'
     
   tasks:
+    - name: Get current timestamp
+      ansible.builtin.command: date -u +"%Y-%m-%dT%H:%M:%SZ"
+      register: current_timestamp
+      changed_when: false
+      delegate_to: localhost
+
     - name: Get AWS account information
       amazon.aws.aws_caller_info:
       register: aws_account_info
@@ -89,7 +95,7 @@
           account_id: "{{ aws_account_info.account }}"
           account_alias: "{{ aws_account_info.account_alias | default('N/A') }}"
           user_arn: "{{ aws_account_info.arn }}"
-          collection_timestamp: "{{ ansible_date_time.iso8601 }}"
+          collection_timestamp: "{{ current_timestamp.stdout }}"
           regions: "{{ finops_regions_data | default([]) }}"
 
     - name: Save collected data to JSON file on ansible-1
