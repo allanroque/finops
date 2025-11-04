@@ -165,8 +165,27 @@
     app_dir: "/opt/finops"
     streamlit_app: "{{ app_dir }}/streamlit_app.py"
     streamlit_port: 8501
+    output_file: "/opt/finops/data/aws_finops_data.json"
     
   tasks:
+    - name: Verify JSON file exists before starting Streamlit
+      ansible.builtin.stat:
+        path: "{{ output_file }}"
+      register: json_file_check
+      become: true
+
+    - name: Display JSON file status before Streamlit
+      ansible.builtin.debug:
+        msg: "JSON file exists: {{ json_file_check.stat.exists }}, path: {{ json_file_check.stat.path | default('N/A') }}, size: {{ json_file_check.stat.size | default('N/A') }} bytes"
+
+    - name: Ensure JSON file has correct permissions
+      ansible.builtin.file:
+        path: "{{ output_file }}"
+        mode: '0644'
+        state: file
+      become: true
+      when: json_file_check.stat.exists
+
     - name: Copy streamlit_app.py to ansible-1
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../streamlit_app.py"
@@ -193,6 +212,16 @@
         seconds: 2
       when: streamlit_status.stdout != "not_running"
 
+    - name: Verify JSON file still exists after stopping Streamlit
+      ansible.builtin.stat:
+        path: "{{ output_file }}"
+      register: json_file_after_stop
+      become: true
+
+    - name: Display JSON file status after stopping Streamlit
+      ansible.builtin.debug:
+        msg: "JSON file exists after stop: {{ json_file_after_stop.stat.exists }}, size: {{ json_file_after_stop.stat.size | default('N/A') }} bytes"
+
     - name: Start Streamlit application in background
       ansible.builtin.shell: |
         cd {{ app_dir }}
@@ -204,6 +233,28 @@
     - name: Wait for Streamlit to start
       ansible.builtin.pause:
         seconds: 3
+
+    - name: Verify JSON file still exists after starting Streamlit
+      ansible.builtin.stat:
+        path: "{{ output_file }}"
+      register: json_file_after_start
+      become: true
+
+    - name: Display JSON file status after starting Streamlit
+      ansible.builtin.debug:
+        msg: "JSON file exists after start: {{ json_file_after_start.stat.exists }}, size: {{ json_file_after_start.stat.size | default('N/A') }} bytes, path: {{ json_file_after_start.stat.path | default('N/A') }}"
+
+    - name: Show file listing of data directory
+      ansible.builtin.shell: |
+        ls -lah {{ app_dir }}/data/
+      register: data_dir_listing
+      become: true
+      changed_when: false
+      failed_when: false
+
+    - name: Display data directory contents
+      ansible.builtin.debug:
+        msg: "{{ data_dir_listing.stdout }}"
 
     - name: Verify Streamlit is running
       ansible.builtin.shell: |
