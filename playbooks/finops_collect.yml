@@ -5,7 +5,7 @@
   gather_facts: false
   
   vars:
-    output_dir: "{{ playbook_dir }}/../data"
+    output_dir: "/opt/finops/data"
     
   tasks:
     - name: Ensure output directory exists
@@ -13,6 +13,8 @@
         path: "{{ output_dir }}"
         state: directory
         mode: '0755'
+        owner: "{{ ansible_user | default('root') }}"
+      become: true
 
     - name: Ensure pip3 is installed
       package:
@@ -27,6 +29,7 @@
           - boto3
           - pandas
         executable: pip3
+      become: true
 
 # Play 2: Coletar dados AWS (executa no execution environment localhost)
 - name: Collect FinOps Data for Streamlit Dashboard
@@ -35,7 +38,7 @@
   gather_facts: false
   
   vars:
-    output_dir: "{{ playbook_dir }}/../data"
+    output_dir: "/opt/finops/data"
     output_file: "{{ output_dir }}/aws_finops_data.json"
     ec2_regions:
       - 'us-east-1'
@@ -83,7 +86,9 @@
         content: "{{ finops_data | to_json(indent=2) }}"
         dest: "{{ output_file }}"
         mode: '0644'
+        owner: "{{ ansible_user | default('root') }}"
       delegate_to: ansible-1
+      become: true
 
     - name: Display summary
       ansible.builtin.debug:
