@@ -1,0 +1,125 @@
+---
+- name: Collect EC2 instances for region {{ region }}
+  amazon.aws.ec2_instance_info:
+    region: "{{ region }}"
+  register: ec2_instances
+  delegate_to: localhost
+
+- name: Collect unused EBS volumes for region {{ region }}
+  amazon.aws.ec2_vol_info:
+    region: "{{ region }}"
+    filters:
+      status: available
+  register: unused_volumes
+  delegate_to: localhost
+  failed_when: false
+
+- name: Collect Elastic IPs for region {{ region }}
+  amazon.aws.ec2_eip_info:
+    region: "{{ region }}"
+  register: eips
+  delegate_to: localhost
+  failed_when: false
+
+- name: Process instances data
+  ansible.builtin.set_fact:
+    processed_instances: >-
+      {%- set instances = [] -%}
+      {%- if ec2_instances.instances is defined -%}
+        {%- for instance in ec2_instances.instances -%}
+          {%- set instance_data = {
+            'instance_id': instance.instance_id,
+            'instance_type': instance.instance_type,
+            'state': instance.state.name,
+            'region': region,
+            'vpc_id': instance.vpc_id | default('N/A'),
+            'subnet_id': instance.subnet_id | default('N/A'),
+            'launch_time': instance.launch_time,
+            'tags': instance.tags | default({}),
+            'name': instance.tags.Name | default('N/A'),
+            'owner': instance.tags.owner | default('N/A'),
+            'cost_center': instance.tags.CostCenter | default('N/A'),
+            'environment': instance.tags.Environment | default('N/A'),
+            'os': instance.tags.OS | default('N/A'),
+            'platform': instance.platform | default('linux'),
+            'architecture': instance.architecture,
+            'private_ip': instance.private_ip_address | default('N/A'),
+            'public_ip': instance.public_ip_address | default('N/A'),
+            'has_required_tags': (
+              (instance.tags.Name is defined) and
+              (instance.tags.owner is defined) and
+              (instance.tags.CostCenter is defined) and
+              (instance.tags.Environment is defined)
+            )
+          } -%}
+          {%- set _ = instances.append(instance_data) -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ instances }}
+
+- name: Process unused volumes
+  ansible.builtin.set_fact:
+    processed_volumes: >-
+      {%- set volumes = [] -%}
+      {%- if unused_volumes.volumes is defined and unused_volumes.volumes is iterable -%}
+        {%- for volume in unused_volumes.volumes -%}
+          {%- if volume.volume_id is defined -%}
+            {%- set volume_data = {
+              'volume_id': volume.volume_id,
+              'size': volume.size | default(0),
+              'volume_type': volume.volume_type | default('unknown'),
+              'region': region,
+              'create_time': volume.create_time | default('N/A'),
+              'tags': volume.tags | default({})
+            } -%}
+            {%- set _ = volumes.append(volume_data) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ volumes }}
+
+- name: Process EIPs
+  ansible.builtin.set_fact:
+    processed_eips: >-
+      {%- set eip_list = [] -%}
+      {%- if eips.addresses is defined and eips.addresses is iterable -%}
+        {%- for eip in eips.addresses -%}
+          {%- if eip.allocation_id is defined -%}
+            {%- set eip_data = {
+              'allocation_id': eip.allocation_id,
+              'public_ip': eip.public_ip | default('N/A'),
+              'region': region,
+              'instance_id': eip.instance_id | default('N/A'),
+              'associated': eip.instance_id is defined and eip.instance_id != ''
+            } -%}
+            {%- set _ = eip_list.append(eip_data) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endif -%}
+      {{ eip_list }}
+
+- name: Aggregate region data
+  ansible.builtin.set_fact:
+    region_data:
+      region: "{{ region }}"
+      instances:
+        running: "{{ processed_instances | selectattr('state', 'equalto', 'running') | list | length }}"
+        stopped: "{{ processed_instances | selectattr('state', 'equalto', 'stopped') | list | length }}"
+        total: "{{ processed_instances | length }}"
+        details: "{{ processed_instances }}"
+      untagged_resources:
+        instances: "{{ processed_instances | rejectattr('has_required_tags') | list }}"
+      unused_volumes:
+        count: "{{ processed_volumes | length }}"
+        total_size_gb: "{{ processed_volumes | sum(attribute='size') | default(0) }}"
+        details: "{{ processed_volumes }}"
+      unused_eips:
+        count: "{{ processed_eips | rejectattr('associated') | list | length }}"
+        details: "{{ processed_eips | rejectattr('associated') | list }}"
+      stopped_instances:
+        count: "{{ processed_instances | selectattr('state', 'equalto', 'stopped') | list | length }}"
+        details: "{{ processed_instances | selectattr('state', 'equalto', 'stopped') | list }}"
+
+- name: Add region data to global list
+  ansible.builtin.set_fact:
+    finops_regions_data: "{{ finops_regions_data | default([]) + [region_data] }}"
