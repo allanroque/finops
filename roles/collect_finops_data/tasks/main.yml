@@ -18,9 +18,10 @@
     region: "{{ region }}"
   register: eips
   failed_when: false
+  ignore_errors: true
 
 - name: Collect Load Balancers Target Groups for region {{ region }}
-  amazon.aws.elbv2_target_group_info:
+  amazon.aws.elb_target_group_info:
     region: "{{ region }}"
   register: target_groups
   failed_when: false
