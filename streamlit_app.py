@@ -107,17 +107,25 @@ def main():
         # Instâncias
         for instance in region_data.get('instances', {}).get('details', []):
             instance['region'] = region
+            # Normalizar estado para lowercase
+            if 'state' in instance:
+                instance['state'] = instance['state'].lower()
             all_instances.append(instance)
         
         # Recursos não taggeados
         for instance in region_data.get('untagged_resources', {}).get('instances', []):
             instance['region'] = region
+            if 'state' in instance:
+                instance['state'] = instance['state'].lower()
             all_untagged.append(instance)
         
-        # Instâncias paradas
-        for instance in region_data.get('stopped_instances', {}).get('details', []):
+        # Instâncias paradas - usar filtro direto nas instâncias
+        for instance in region_data.get('instances', {}).get('details', []):
             instance['region'] = region
-            all_stopped.append(instance)
+            if 'state' in instance:
+                instance['state'] = instance['state'].lower()
+            if instance.get('state') == 'stopped':
+                all_stopped.append(instance)
         
         # Volumes não utilizados
         for volume in region_data.get('unused_volumes', {}).get('details', []):
@@ -133,8 +141,8 @@ def main():
     col1, col2, col3, col4 = st.columns(4)
     
     total_instances = len(all_instances)
-    running_instances = len([i for i in all_instances if i.get('state') == 'running'])
-    stopped_instances = len(all_stopped)
+    running_instances = len([i for i in all_instances if i.get('state', '').lower() == 'running'])
+    stopped_instances = len([i for i in all_instances if i.get('state', '').lower() == 'stopped'])
     untagged_count = len(all_untagged)
     
     with col1:
