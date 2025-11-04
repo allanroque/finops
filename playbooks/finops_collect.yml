@@ -104,13 +104,26 @@
       delegate_to: ansible-1
       become: true
 
-    - name: Save collected data to JSON file on ansible-1
+    - name: Create temporary JSON file locally
       ansible.builtin.copy:
         content: "{{ finops_data | to_json(indent=2) }}"
+        dest: "/tmp/aws_finops_data.json"
+        mode: '0644'
+      delegate_to: localhost
+
+    - name: Copy JSON file from localhost to ansible-1
+      ansible.builtin.copy:
+        src: "/tmp/aws_finops_data.json"
         dest: "{{ output_file }}"
         mode: '0644'
       delegate_to: ansible-1
       become: true
+
+    - name: Clean up temporary file
+      ansible.builtin.file:
+        path: "/tmp/aws_finops_data.json"
+        state: absent
+      delegate_to: localhost
 
     - name: Display summary
       ansible.builtin.debug:
