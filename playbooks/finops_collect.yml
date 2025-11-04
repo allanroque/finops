@@ -119,6 +119,17 @@
       delegate_to: ansible-1
       become: true
 
+    - name: Display file content after copy
+      ansible.builtin.shell: cat {{ output_file }}
+      register: file_content
+      delegate_to: ansible-1
+      changed_when: false
+      failed_when: false
+
+    - name: Show file content
+      ansible.builtin.debug:
+        msg: "{{ file_content.stdout }}"
+
     - name: Verify file was created on ansible-1
       ansible.builtin.stat:
         path: "{{ output_file }}"
@@ -143,7 +154,7 @@
 
     - name: Display summary
       ansible.builtin.debug:
-        msg: "FinOps data collected and saved to {{ output_file }} on ansible-1"
+        msg: "FinOps data collected and saved to {{ output_file }} on ansible-1. Temporary files kept in /tmp/aws_finops_data.json (localhost) and /tmp/aws_finops_data.json (ansible-1) for analysis."
 
 # Play 3: Deploy e iniciar aplicação Streamlit no ansible-1
 - name: Deploy and start Streamlit application
