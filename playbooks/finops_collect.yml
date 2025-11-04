@@ -146,11 +146,11 @@
       when: not file_stat.stat.exists
       delegate_to: ansible-1
 
-    - name: Clean up local temporary file
-      ansible.builtin.file:
-        path: "/tmp/aws_finops_data.json"
-        state: absent
-      delegate_to: localhost
+#    - name: Clean up local temporary file
+#      ansible.builtin.file:
+#        path: "/tmp/aws_finops_data.json"
+#        state: absent
+#      delegate_to: localhost
 
     - name: Display summary
       ansible.builtin.debug:
