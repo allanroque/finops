@@ -51,10 +51,15 @@ st.markdown("""
 @st.cache_data(ttl=300)
 def load_data():
     """Carrega os dados do arquivo JSON"""
+    # Tenta primeiro o caminho relativo (quando o app está em /opt/finops/)
     data_file = Path(__file__).parent / "data" / "aws_finops_data.json"
     
+    # Se não encontrar, tenta o caminho absoluto de produção
     if not data_file.exists():
-        st.error(f"Arquivo de dados não encontrado: {data_file}")
+        data_file = Path("/opt/finops/data/aws_finops_data.json")
+    
+    if not data_file.exists():
+        st.error(f"Arquivo de dados não encontrado em: {data_file}")
         st.info("Execute o playbook finops_collect.yml primeiro para coletar os dados.")
         return None
     
