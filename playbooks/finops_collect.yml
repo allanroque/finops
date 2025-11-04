@@ -178,13 +178,20 @@
       ansible.builtin.debug:
         msg: "JSON file exists: {{ json_file_check.stat.exists }}, path: {{ json_file_check.stat.path | default('N/A') }}, size: {{ json_file_check.stat.size | default('N/A') }} bytes"
 
+    - name: Copy JSON file from temp if it doesn't exist
+      ansible.builtin.copy:
+        src: "/tmp/aws_finops_data.json"
+        dest: "{{ output_file }}"
+        mode: '0644'
+      become: true
+      when: not json_file_check.stat.exists
+
     - name: Ensure JSON file has correct permissions
       ansible.builtin.file:
         path: "{{ output_file }}"
         mode: '0644'
         state: file
       become: true
-      when: json_file_check.stat.exists
 
     - name: Copy streamlit_app.py to ansible-1
       ansible.builtin.copy:
@@ -200,6 +207,26 @@
       changed_when: false
       failed_when: false
 
+    - name: Verify JSON file exists before stopping Streamlit
+      ansible.builtin.stat:
+        path: "{{ output_file }}"
+      register: json_file_before_stop
+      become: true
+      when: streamlit_status.stdout != "not_running"
+
+    - name: Display JSON file status before stopping
+      ansible.builtin.debug:
+        msg: "JSON file exists before stop: {{ json_file_before_stop.stat.exists }}, size: {{ json_file_before_stop.stat.size | default('N/A') }} bytes"
+      when: streamlit_status.stdout != "not_running"
+
+    - name: Backup JSON file before stopping Streamlit
+      ansible.builtin.copy:
+        src: "{{ output_file }}"
+        dest: "/tmp/aws_finops_data_backup.json"
+        remote_src: true
+      become: true
+      when: streamlit_status.stdout != "not_running" and json_file_before_stop.stat.exists
+
     - name: Stop existing Streamlit process if running
       ansible.builtin.shell: |
         pkill -f "streamlit.*8501" || true
@@ -212,6 +239,14 @@
         seconds: 2
       when: streamlit_status.stdout != "not_running"
 
+    - name: Restore JSON file if it was removed
+      ansible.builtin.copy:
+        src: "/tmp/aws_finops_data_backup.json"
+        dest: "{{ output_file }}"
+        mode: '0644'
+      become: true
+      when: streamlit_status.stdout != "not_running"
+
     - name: Verify JSON file still exists after stopping Streamlit
       ansible.builtin.stat:
         path: "{{ output_file }}"
@@ -221,6 +256,14 @@
     - name: Display JSON file status after stopping Streamlit
       ansible.builtin.debug:
         msg: "JSON file exists after stop: {{ json_file_after_stop.stat.exists }}, size: {{ json_file_after_stop.stat.size | default('N/A') }} bytes"
+
+    - name: Ensure JSON file exists before starting Streamlit
+      ansible.builtin.copy:
+        src: "/tmp/aws_finops_data.json"
+        dest: "{{ output_file }}"
+        mode: '0644'
+      become: true
+      when: not json_file_after_stop.stat.exists
 
     - name: Start Streamlit application in background
       ansible.builtin.shell: |
@@ -243,6 +286,14 @@
     - name: Display JSON file status after starting Streamlit
       ansible.builtin.debug:
         msg: "JSON file exists after start: {{ json_file_after_start.stat.exists }}, size: {{ json_file_after_start.stat.size | default('N/A') }} bytes, path: {{ json_file_after_start.stat.path | default('N/A') }}"
+
+    - name: Ensure JSON file exists - final check
+      ansible.builtin.copy:
+        src: "/tmp/aws_finops_data.json"
+        dest: "{{ output_file }}"
+        mode: '0644'
+      become: true
+      when: not json_file_after_start.stat.exists
 
     - name: Show file listing of data directory
       ansible.builtin.shell: |
