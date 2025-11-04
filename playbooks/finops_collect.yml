@@ -6,6 +6,7 @@
   
   vars:
     output_dir: "/opt/finops/data"
+    app_dir: "/opt/finops"
     
   tasks:
     - name: Ensure output directory exists
@@ -13,7 +14,15 @@
         path: "{{ output_dir }}"
         state: directory
         mode: '0755'
-        owner: "{{ ansible_user | default('root') }}"
+        owner: "{{ ansible_user | default('ansible') }}"
+      become: true
+
+    - name: Ensure app directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user | default('ansible') }}"
       become: true
 
     - name: Ensure pip3 is installed
@@ -23,11 +32,13 @@
         state: present
       become: true
 
-    - name: Install boto3 and pandas
+    - name: Install boto3, pandas, streamlit and plotly
       pip:
         name:
           - boto3
           - pandas
+          - streamlit
+          - plotly
         executable: pip3
       become: true
 
@@ -86,10 +97,73 @@
         content: "{{ finops_data | to_json(indent=2) }}"
         dest: "{{ output_file }}"
         mode: '0644'
-        owner: "{{ ansible_user | default('root') }}"
+        owner: "{{ ansible_user | default('ansible') }}"
       delegate_to: ansible-1
       become: true
 
     - name: Display summary
       ansible.builtin.debug:
         msg: "FinOps data collected and saved to {{ output_file }} on ansible-1"
+
+# Play 3: Deploy e iniciar aplicação Streamlit no ansible-1
+- name: Deploy and start Streamlit application
+  hosts: ansible-1
+  gather_facts: false
+  
+  vars:
+    app_dir: "/opt/finops"
+    streamlit_app: "{{ app_dir }}/streamlit_app.py"
+    streamlit_port: 8501
+    
+  tasks:
+    - name: Copy streamlit_app.py to ansible-1
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../streamlit_app.py"
+        dest: "{{ streamlit_app }}"
+        mode: '0644'
+        owner: "{{ ansible_user | default('ansible') }}"
+      become: true
+
+    - name: Check if Streamlit is already running
+      ansible.builtin.shell: |
+        ps aux | grep -E "streamlit.*8501" | grep -v grep || echo "not_running"
+      register: streamlit_status
+      changed_when: false
+      failed_when: false
+
+    - name: Stop existing Streamlit process if running
+      ansible.builtin.shell: |
+        pkill -f "streamlit.*8501" || true
+      become: true
+      when: streamlit_status.stdout != "not_running"
+      failed_when: false
+
+    - name: Wait for process to stop
+      ansible.builtin.pause:
+        seconds: 2
+      when: streamlit_status.stdout != "not_running"
+
+    - name: Start Streamlit application in background
+      ansible.builtin.shell: |
+        cd {{ app_dir }}
+        nohup streamlit run {{ streamlit_app }} --server.port {{ streamlit_port }} --server.address 0.0.0.0 > /tmp/streamlit.log 2>&1 &
+        echo $!
+      register: streamlit_pid
+      changed_when: true
+      become_user: "{{ ansible_user | default('ansible') }}"
+
+    - name: Wait for Streamlit to start
+      ansible.builtin.pause:
+        seconds: 3
+
+    - name: Verify Streamlit is running
+      ansible.builtin.shell: |
+        ps aux | grep -E "streamlit.*8501" | grep -v grep
+      register: streamlit_check
+      changed_when: false
+      failed_when: streamlit_check.rc != 0
+
+    - name: Display Streamlit status
+      ansible.builtin.debug:
+        msg: "Streamlit application started successfully on port {{ streamlit_port }}. Access at http://{{ inventory_hostname }}:{{ streamlit_port }}"
+      when: streamlit_check.rc == 0
